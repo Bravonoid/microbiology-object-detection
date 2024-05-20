@@ -164,28 +164,39 @@ if uploaded_image is not None:
     # Display the result
     st.image(result, caption="Detected Objects", use_column_width=True)
 
-    # Display objects as per row per cluster
-    st.subheader("Detected Objects")
-    cluster_objects = []
-    for i in range(n_clusters):
-        cluster_objects.append(
-            [obj for obj, label in zip(objects, labels) if label == i]
+    clustered_objects = []
+    for i, obj in enumerate(objects):
+        clustered_objects.append((obj, labels[i]))
+
+    # Plot 1 cluster examples in a grid plot
+    st.subheader("Clustered Object Examples")
+
+    # Sort objects by cluster
+    clustered_objects.sort(key=lambda x: x[1])
+
+    # Count the number of objects in each cluster
+    cluster_counts = [0] * n_clusters
+    for _, label in clustered_objects:
+        cluster_counts[label] += 1
+
+    # Only show 1 object per cluster
+    clustered_objects = [
+        clustered_objects[i]
+        for i in range(len(clustered_objects))
+        if i == 0 or clustered_objects[i][1] != clustered_objects[i - 1][1]
+    ]
+
+    # Displaying 1 object per cluster and the cluster count
+    cols = st.columns(8)
+    for i, (obj, label) in enumerate(clustered_objects):
+        cols[i % 8].write(f"Cluster {label+1}")
+        cols[i % 8].image(
+            obj,
+            caption=f"({cluster_counts[label]} objects)",
+            use_column_width=True,
         )
-
-    for i, objects in enumerate(cluster_objects):
-        st.write(f"Cluster {i + 1}")
-        # Maximum display 10 objects per cluster in a row
-        n_objects = min(len(objects), 10)
-        n_rows = (n_objects - 1) // 5 + 1
-        fig, axs = plt.subplots(n_rows, 5, figsize=(20, 4 * n_rows))
-        axs = axs.ravel()
-        for j in range(n_objects):
-            axs[j].imshow(objects[j])
-            axs[j].axis("off")
-        for j in range(n_objects, n_rows * 5):
-            axs[j].axis("off")
-        st.pyplot(fig)
-
+        if i % 8 == 7:
+            cols = st.columns(8)
 
 else:
     st.info("Please upload an image.")
