@@ -29,7 +29,7 @@ filter_size = st.sidebar.slider("Filter Size", 1, 250, 30)
 
 # Cluster size
 st.sidebar.subheader("Cluster Size")
-n_clusters = st.sidebar.slider("Cluster Size", 1, 10, 2)
+n_clusters = st.sidebar.slider("Cluster Size", 1, 100, 5)
 
 
 def detect(image):
