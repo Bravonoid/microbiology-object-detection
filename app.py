@@ -4,6 +4,10 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+from skimage.feature import graycomatrix, graycoprops
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+
 
 from PIL import Image
 
@@ -21,8 +25,11 @@ uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "pn
 
 # Filter size
 st.sidebar.subheader("Filter Size")
-st.write("Select the amount of pixels to filter out small objects.")
 filter_size = st.sidebar.slider("Filter Size", 1, 250, 30)
+
+# Cluster size
+st.sidebar.subheader("Cluster Size")
+n_clusters = st.sidebar.slider("Cluster Size", 1, 10, 2)
 
 
 def detect(image):
@@ -49,14 +56,72 @@ def detect(image):
     # Obtain contours
     contours, _ = cv2.findContours(filtered, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Find bounding boxes
+    return image, contours
+
+
+def extract_features(image, contours):
     bounding_boxes = [cv2.boundingRect(contour) for contour in contours]
 
-    # Draw bounding boxes
-    for x, y, w, h in bounding_boxes:
-        cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    # Define GLCM properties
+    properties = ["contrast", "dissimilarity", "homogeneity", "energy", "correlation"]
 
-    return image, contours
+    # Define distances and angles
+    distances = [1, 2, 3]
+    angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
+
+    # Initialize feature matrix
+    features = []
+
+    # Extract features for each bounding box
+    for x, y, w, h in bounding_boxes:
+        # Crop the object
+        obj = image[y : y + h, x : x + w]
+
+        # Convert the object to grayscale
+        gray = cv2.cvtColor(obj, cv2.COLOR_RGB2GRAY)
+
+        # Compute GLCM
+        glcm = graycomatrix(gray, distances, angles, symmetric=True, normed=True)
+
+        # Compute GLCM properties
+        props = [graycoprops(glcm, prop)[0, 0] for prop in properties]
+
+        # Append to feature matrix
+        features.append(props)
+
+    # Convert to numpy array
+    features = np.array(features)
+
+    # Standardize features
+    scaler = StandardScaler()
+    features = scaler.fit_transform(features)
+
+    return features
+
+
+def cluster(features, n_clusters=2):
+    # Cluster the features
+    kmeans = KMeans(n_clusters=n_clusters)
+    kmeans.fit(features)
+    labels = kmeans.labels_
+
+    return labels
+
+
+def visualize(image, contours, labels):
+    # Visualize the objects
+    vis = image.copy()
+
+    # Different colors for each label
+    colors = np.random.randint(0, 255, (labels.max() + 1, 3))
+
+    # Draw bounding boxes
+    for contour, label in zip(contours, labels):
+        x, y, w, h = cv2.boundingRect(contour)
+        color = colors[label].tolist()
+        cv2.rectangle(vis, (x, y), (x + w, y + h), color, 2)
+
+    return vis
 
 
 def crop(image, contours):
@@ -81,19 +146,31 @@ if uploaded_image is not None:
     # Detect objects
     result, contours = detect(img)
 
+    # Extract features
+    features = extract_features(img, contours)
+
+    # Cluster the features
+    labels = cluster(features, n_clusters=n_clusters)
+
+    # Visualize the result
+    result = visualize(result, contours, labels)
+
+    # Crop the objects
+    objects = crop(result, contours)
+
     # Display the result
     st.image(result, caption="Detected Objects", use_column_width=True)
 
-    # Display the number of objects detected
-    st.subheader(f"Number of objects detected: {len(contours)}")
+    # Display objects as clusters
+    st.subheader("Detected Objects")
+    cols = st.columns(n_clusters)
 
-    # Crop objects
-    objects = crop(img, contours)
+    # Add text to the columns
+    for i in range(n_clusters):
+        cols[i].write(f"Cluster {i + 1}")
 
-    # Display the cropped objects in a grid
-    cols = st.columns(10)
     for i, obj in enumerate(objects):
-        cols[i % 10].image(obj, caption=f"Object {i+1}", use_column_width=True)
+        cols[labels[i]].image(obj, caption=f"Object {i + 1}")
 
 else:
     st.info("Please upload an image.")
