@@ -27,10 +27,6 @@ uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "pn
 st.sidebar.subheader("Filter Size")
 filter_size = st.sidebar.slider("Filter Size", 1, 250, 30)
 
-# Cluster size
-st.sidebar.subheader("Cluster Size")
-n_clusters = st.sidebar.slider("Cluster Size", 1, 100, 5)
-
 
 def detect(image):
     image = image.copy()
@@ -149,6 +145,13 @@ if uploaded_image is not None:
     # Extract features
     features = extract_features(img, contours)
 
+    # Cluster size
+    st.sidebar.subheader("Cluster Size")
+    n_clusters = st.sidebar.slider("Cluster Size", 1, len(features), 2)
+
+    # Check if n_clusters is valid
+    n_clusters = min(n_clusters, len(features))
+
     # Cluster the features
     labels = cluster(features, n_clusters=n_clusters)
 
@@ -161,16 +164,28 @@ if uploaded_image is not None:
     # Display the result
     st.image(result, caption="Detected Objects", use_column_width=True)
 
-    # Display objects as clusters
+    # Display objects as per row per cluster
     st.subheader("Detected Objects")
-    cols = st.columns(n_clusters)
-
-    # Add text to the columns
+    cluster_objects = []
     for i in range(n_clusters):
-        cols[i].write(f"Cluster {i + 1}")
+        cluster_objects.append(
+            [obj for obj, label in zip(objects, labels) if label == i]
+        )
 
-    for i, obj in enumerate(objects):
-        cols[labels[i]].image(obj, caption=f"Object {i + 1}")
+    for i, objects in enumerate(cluster_objects):
+        st.write(f"Cluster {i + 1}")
+        # Maximum display 10 objects per cluster in a row
+        n_objects = min(len(objects), 10)
+        n_rows = (n_objects - 1) // 5 + 1
+        fig, axs = plt.subplots(n_rows, 5, figsize=(20, 4 * n_rows))
+        axs = axs.ravel()
+        for j in range(n_objects):
+            axs[j].imshow(objects[j])
+            axs[j].axis("off")
+        for j in range(n_objects, n_rows * 5):
+            axs[j].axis("off")
+        st.pyplot(fig)
+
 
 else:
     st.info("Please upload an image.")
