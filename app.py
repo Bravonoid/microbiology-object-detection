@@ -1,202 +1,245 @@
-# Streamlit app for Microbiology Object Detection
-
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+import tempfile
 import cv2
-from skimage.feature import graycomatrix, graycoprops
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-
-
+from roboflow import Roboflow
 from PIL import Image
+import io
+import av
 
 # Title
 st.title("Microbiology Object Detection using Image Processing")
 
-# Sidebar
-st.sidebar.title("About")
-st.sidebar.info(
-    "This app is a simple demo of Microbiology Object Detection using Image Processing. You can upload an image and the app will detect the objects in the image."
-)
+# Confidence level
+st.sidebar.subheader("Confidence Level")
+st.sidebar.info("Set the confidence level for object detection.")
+confidence = st.sidebar.slider("Confidence Level", 1, 100, 20)
 
-# Upload image
-uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+# Input type
+st.sidebar.subheader("Input Type")
+input_type = st.sidebar.radio("Input Type", ["Image", "Video"])
 
-# Filter size
-st.sidebar.subheader("Filter Size")
-filter_size = st.sidebar.slider("Filter Size", 1, 250, 30)
+# Model
+rf = Roboflow(api_key=st.secrets["roboflow"]["apikey"])
+project = rf.workspace().project("histogram-equalization-u3ofv")
+model = project.version(1).model
 
-
-def detect(image):
-    image = image.copy()
-
-    # Convert the image to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
-    # Edge detection
-    edges = cv2.Canny(gray, 100, 200)
-
-    # Fill holes
-    filled = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-
-    # Remove small objects
-    contours, _ = cv2.findContours(filled, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Filter small objects
-    filtered = np.zeros_like(filled)
-    for contour in contours:
-        if cv2.contourArea(contour) > filter_size:
-            cv2.drawContours(filtered, [contour], -1, 255, -1)
-
-    # Obtain contours
-    contours, _ = cv2.findContours(filtered, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    return image, contours
+# Color
+colors = [
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (255, 255, 0),
+    (0, 255, 255),
+    (255, 0, 255),
+]
 
 
-def extract_features(image, contours):
-    bounding_boxes = [cv2.boundingRect(contour) for contour in contours]
-
-    # Define GLCM properties
-    properties = ["contrast", "dissimilarity", "homogeneity", "energy", "correlation"]
-
-    # Define distances and angles
-    distances = [1, 2, 3]
-    angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
-
-    # Initialize feature matrix
-    features = []
-
-    # Extract features for each bounding box
-    for x, y, w, h in bounding_boxes:
-        # Crop the object
-        obj = image[y : y + h, x : x + w]
-
-        # Convert the object to grayscale
-        gray = cv2.cvtColor(obj, cv2.COLOR_RGB2GRAY)
-
-        # Compute GLCM
-        glcm = graycomatrix(gray, distances, angles, symmetric=True, normed=True)
-
-        # Compute GLCM properties
-        props = [graycoprops(glcm, prop)[0, 0] for prop in properties]
-
-        # Append to feature matrix
-        features.append(props)
-
-    # Convert to numpy array
-    features = np.array(features)
-
-    # Standardize features
-    scaler = StandardScaler()
-    features = scaler.fit_transform(features)
-
-    return features
+# Biomass calculation
+def calculate_biomass(area):
+    # Biomass = area * 6.836/0.00001 / 2 * 0.5
+    return area * 6.836 / 0.00001 / 2 * 0.5
 
 
-def cluster(features, n_clusters=2):
-    # Cluster the features
-    kmeans = KMeans(n_clusters=n_clusters)
-    kmeans.fit(features)
-    labels = kmeans.labels_
+if input_type == "Image":
+    # Upload image
+    uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
-    return labels
+    detected_objects = []
 
+    if uploaded_image is not None:
+        # Read the image
+        image = Image.open(uploaded_image)
+        image = np.array(image)
 
-def visualize(image, contours, labels):
-    # Visualize the objects
-    vis = image.copy()
+        # Display the image
+        st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Different colors for each label
-    colors = np.random.randint(0, 255, (labels.max() + 1, 3))
+        # Detect objects in the image
+        prediction = model.predict(image, confidence=confidence, overlap=30).json()
 
-    # Draw bounding boxes
-    for contour, label in zip(contours, labels):
-        x, y, w, h = cv2.boundingRect(contour)
-        color = colors[label].tolist()
-        cv2.rectangle(vis, (x, y), (x + w, y + h), color, 2)
+        for p in prediction["predictions"]:
+            x_center, y_center, w, h = (
+                int(p["x"]),
+                int(p["y"]),
+                int(p["width"]),
+                int(p["height"]),
+            )
+            x1, y1, x2, y2 = (
+                x_center - w // 2,
+                y_center - h // 2,
+                x_center + w // 2,
+                y_center + h // 2,
+            )
 
-    return vis
+            # Calculate area
+            area = w * h
 
+            # Calculate biomass
+            biomass = calculate_biomass(area)
 
-def crop(image, contours):
-    # Crop objects from the image
-    objects = []
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        obj = image[y : y + h, x : x + w]
-        objects.append(obj)
+            # Draw bounding box
+            cv2.rectangle(image, (x1, y1), (x2, y2), colors[p["class_id"]], 2)
 
-    return objects
+            # Draw label with border
+            cv2.putText(
+                image,
+                f'{p["class"]} ({p["confidence"]*100:.2f}%)',
+                (x1, y1 - 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),
+                1,
+            )
 
+            # Draw biomass
+            cv2.putText(
+                image,
+                f"Biomass: {biomass:.2f} g",
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                (0, 0, 0),
+                1,
+            )
 
-if uploaded_image is not None:
-    # Read the image
-    img = Image.open(uploaded_image)
-    img = np.array(img)
+            # Append to detected objects
+            detected_objects.append(
+                {
+                    "class": p["class"],
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "biomass": biomass,
+                    "confidence": p["confidence"],
+                    "color": f"rgb{colors[p['class_id']]}",
+                    "class_id": p["class_id"],
+                }
+            )
 
-    # Display the image
-    st.image(img, caption="Uploaded Image", use_column_width=True)
+        # Display the detected objects
+        st.image(image, caption="Detected Objects", use_column_width=True)
 
-    # Detect objects
-    result, contours = detect(img)
+    else:
+        st.info("Please upload an image.")
 
-    # Extract features
-    features = extract_features(img, contours)
+elif input_type == "Video":
+    # Upload video
+    uploaded_video = st.file_uploader("Upload a video", type=["mp4"])
 
-    # Cluster size
-    st.sidebar.subheader("Cluster Size")
-    n_clusters = st.sidebar.slider("Cluster Size", 1, len(features), 2)
+    # Add loading spinner
+    if uploaded_video is not None:
+        with st.spinner("Analyzing video..."):
+            tfile = tempfile.NamedTemporaryFile(delete=False)
+            tfile.write(uploaded_video.read())
 
-    # Check if n_clusters is valid
-    n_clusters = min(n_clusters, len(features))
+            # Read the video
+            video = cv2.VideoCapture(tfile.name)
 
-    # Cluster the features
-    labels = cluster(features, n_clusters=n_clusters)
+            # Get video properties
+            width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = int(video.get(cv2.CAP_PROP_FPS))
 
-    # Visualize the result
-    result = visualize(result, contours, labels)
+            output_memory_file = io.BytesIO()  # Create BytesIO "in memory file".
 
-    # Crop the objects
-    objects = crop(result, contours)
+            output = av.open(
+                output_memory_file, "w", format="mp4"
+            )  # Open "in memory file" as MP4 video output
+            stream = output.add_stream(
+                "h264", str(fps)
+            )  # Add H.264 video stream to the MP4 container, with framerate = fps.
+            stream.width = width  # Set frame width
+            stream.height = height  # Set frame height
+            # stream.pix_fmt = 'yuv444p'   # Select yuv444p pixel format (better quality than default yuv420p).
+            stream.pix_fmt = (
+                "yuv420p"  # Select yuv420p pixel format for wider compatibility.
+            )
+            stream.options = {
+                "crf": "17"
+            }  # Select low crf for high quality (the price is larger file size).
 
-    # Display the result
-    st.image(result, caption="Detected Objects", use_column_width=True)
+            # Create a video writer using x264 codec
+            # fourcc = cv2.VideoWriter_fourcc(*"H264")
+            # out = cv2.VideoWriter("output.mp4", fourcc, fps, (width, height))
 
-    clustered_objects = []
-    for i, obj in enumerate(objects):
-        clustered_objects.append((obj, labels[i]))
+            while True:
+                ret, frame = video.read()
 
-    # Plot 1 cluster examples in a grid plot
-    st.subheader("Clustered Object Examples")
+                if not ret:
+                    break
 
-    # Sort objects by cluster
-    clustered_objects.sort(key=lambda x: x[1])
+                # Detect objects in the frame
+                prediction = model.predict(
+                    frame, confidence=confidence, overlap=30
+                ).json()
 
-    # Count the number of objects in each cluster
-    cluster_counts = [0] * n_clusters
-    for _, label in clustered_objects:
-        cluster_counts[label] += 1
+                for p in prediction["predictions"]:
+                    x_center, y_center, w, h = (
+                        int(p["x"]),
+                        int(p["y"]),
+                        int(p["width"]),
+                        int(p["height"]),
+                    )
+                    x1, y1, x2, y2 = (
+                        x_center - w // 2,
+                        y_center - h // 2,
+                        x_center + w // 2,
+                        y_center + h // 2,
+                    )
 
-    # Only show 1 object per cluster
-    clustered_objects = [
-        clustered_objects[i]
-        for i in range(len(clustered_objects))
-        if i == 0 or clustered_objects[i][1] != clustered_objects[i - 1][1]
-    ]
+                    # Calculate area
+                    area = w * h
 
-    # Displaying 1 object per cluster and the cluster count
-    cols = st.columns(8)
-    for i, (obj, label) in enumerate(clustered_objects):
-        cols[i % 8].write(f"Cluster {label+1}")
-        cols[i % 8].image(
-            obj,
-            caption=f"({cluster_counts[label]} objects)",
-            use_column_width=True,
-        )
-        if i % 8 == 7:
-            cols = st.columns(8)
+                    # Calculate biomass
+                    biomass = calculate_biomass(area)
 
-else:
-    st.info("Please upload an image.")
+                    # Draw bounding box
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), colors[p["class_id"]], 2)
+
+                    # Draw label with border
+                    cv2.putText(
+                        frame,
+                        f'{p["class"]} ({p["confidence"]*100:.2f}%)',
+                        (x1, y1 - 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 0, 0),
+                        1,
+                    )
+
+                    # Draw biomass
+                    cv2.putText(
+                        frame,
+                        f"Biomass: {biomass:.2f} g",
+                        (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (0, 0, 0),
+                        1,
+                    )
+
+                # Write the frame to the output video
+                frame = av.VideoFrame.from_ndarray(
+                    frame, format="bgr24"
+                )  # Convert image from NumPy Array to frame.
+                packet = stream.encode(frame)  # Encode video frame
+                output.mux(
+                    packet
+                )  # "Mux" the encoded frame (add the encoded frame to MP4 file).
+
+            # Flush the encoder
+            packet = stream.encode(None)
+            output.mux(packet)
+            output.close()
+
+            output_memory_file.seek(0)  # Seek to the beginning of the BytesIO.
+            # video_bytes = output_memory_file.read()  # Convert BytesIO to bytes array
+            # st.video(video_bytes)
+            st.video(
+                output_memory_file
+            )  # Streamlit supports BytesIO object - we don't have to convert it to bytes array.
+
+    else:
+        st.info("Please upload a video.")
