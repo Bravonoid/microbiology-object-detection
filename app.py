@@ -6,6 +6,7 @@ from roboflow import Roboflow
 from PIL import Image
 import io
 import av
+import pandas as pd
 
 # Title
 st.title("Microbiology Object Detection using Image Processing")
@@ -39,6 +40,83 @@ colors = [
 def calculate_biomass(area):
     # Biomass = area * 6.836/0.00001 / 2 * 0.5
     return area * 6.836 / 0.00001 / 2 * 0.5
+
+
+# Only take one object per class
+def class_sample(objects):
+    class_ids = []
+    sampled_objects = []
+
+    for obj in objects:
+        if obj["class_id"] not in class_ids:
+            class_ids.append(obj["class_id"])
+            sampled_objects.append(obj)
+
+    return sampled_objects
+
+
+def diversity_class_sample(detected_objects):
+    st.write("---")
+    # Subheader 1: Diversity and class sample
+    diversity = len(set([obj["class"] for obj in detected_objects]))
+    st.subheader("Diversity and Class Sample")
+    # Diversity score, < 5: low, 5-15: medium, > 15: high
+    diversity_score = (
+        "Low"
+        if diversity < 5
+        else "Medium" if diversity >= 5 and diversity <= 15 else "High"
+    )
+    # Color diversity score
+    color = (
+        "red"
+        if diversity < 5
+        else "yellow" if diversity >= 5 and diversity <= 15 else "green"
+    )
+    st.write(f"Diversity: :{color}[{diversity_score}] ({diversity} classes)")
+
+    # Class sample
+    sampled_objects = class_sample(detected_objects)
+    st.write("Class Sample:")
+    # Crop and display the class sample in a grid layout
+    cols = st.columns(len(sampled_objects))
+    for i, obj in enumerate(sampled_objects):
+        x1, y1, x2, y2 = obj["x1"], obj["y1"], obj["x2"], obj["y2"]
+        cropped = obj["image"][y1:y2, x1:x2]
+        cols[i].image(cropped, caption=obj["class"], use_column_width=True)
+
+
+def total_biomass(detected_objects):
+    st.write("---")
+
+    # Subheader 2: Biomass estimation
+    st.subheader("Biomass Estimation")
+    # Total biomass
+    total_biomass = sum([obj["biomass"] for obj in detected_objects])
+    st.write(f"Fungi Biomass: **{total_biomass:.2f}** g")
+    st.write("Bacteria Biomass: To be implemented.")
+
+
+def total_object_per_class(detected_objects):
+    st.write("---")
+
+    # Subheader 3: Total objects for each class
+    st.subheader("Total Objects for Each Class")
+    total_object_per_class = {}
+    for obj in detected_objects:
+        if obj["class"] in total_object_per_class:
+            total_object_per_class[obj["class"]] += 1
+        else:
+            total_object_per_class[obj["class"]] = 1
+    table = pd.DataFrame(
+        {
+            "Class": list(total_object_per_class.keys()),
+            "Total Objects": list(total_object_per_class.values()),
+        }
+    )
+
+    st.write(table)
+
+    st.write("Defficiency: To be implemented.")
 
 
 if input_type == "Image":
@@ -106,6 +184,7 @@ if input_type == "Image":
             # Append to detected objects
             detected_objects.append(
                 {
+                    "image": image,
                     "class": p["class"],
                     "x1": x1,
                     "y1": y1,
@@ -121,12 +200,23 @@ if input_type == "Image":
         # Display the detected objects
         st.image(image, caption="Detected Objects", use_column_width=True)
 
+        # Subheader 1: Diversity and class sample
+        diversity_class_sample(detected_objects)
+
+        # Subheader 2: Biomass estimation
+        total_biomass(detected_objects)
+
+        # Subheader 3: Total objects for each class
+        total_object_per_class(detected_objects)
+
     else:
         st.info("Please upload an image.")
 
 elif input_type == "Video":
     # Upload video
     uploaded_video = st.file_uploader("Upload a video", type=["mp4"])
+
+    detected_objects = []
 
     # Add loading spinner
     if uploaded_video is not None:
@@ -159,10 +249,6 @@ elif input_type == "Video":
             stream.options = {
                 "crf": "17"
             }  # Select low crf for high quality (the price is larger file size).
-
-            # Create a video writer using x264 codec
-            # fourcc = cv2.VideoWriter_fourcc(*"H264")
-            # out = cv2.VideoWriter("output.mp4", fourcc, fps, (width, height))
 
             while True:
                 ret, frame = video.read()
@@ -220,6 +306,22 @@ elif input_type == "Video":
                         1,
                     )
 
+                    # Append to detected objects
+                    detected_objects.append(
+                        {
+                            "image": frame,
+                            "class": p["class"],
+                            "x1": x1,
+                            "y1": y1,
+                            "x2": x2,
+                            "y2": y2,
+                            "biomass": biomass,
+                            "confidence": p["confidence"],
+                            "color": f"rgb{colors[p['class_id']]}",
+                            "class_id": p["class_id"],
+                        }
+                    )
+
                 # Write the frame to the output video
                 frame = av.VideoFrame.from_ndarray(
                     frame, format="bgr24"
@@ -240,6 +342,15 @@ elif input_type == "Video":
             st.video(
                 output_memory_file
             )  # Streamlit supports BytesIO object - we don't have to convert it to bytes array.
+
+            # Subheader 1: Diversity and class sample
+            diversity_class_sample(detected_objects)
+
+            # Subheader 2: Biomass estimation
+            total_biomass(detected_objects)
+
+            # Subheader 3: Total objects for each class
+            total_object_per_class(detected_objects)
 
     else:
         st.info("Please upload a video.")
