@@ -85,22 +85,86 @@ def diversity_class_sample(detected_objects):
         cols[i].image(cropped, caption=obj["class"], use_column_width=True)
 
 
-def total_biomass(detected_objects):
+def total_biomass(detected_objects, is_video=False):
     st.write("---")
 
     # Subheader 2: Biomass estimation
     st.subheader("Biomass Estimation")
+
+    if is_video:
+        # Average the total biomass per frame
+        total_biomass_per_frame = {}
+        for obj in detected_objects:
+            if obj["frame"] in total_biomass_per_frame:
+                total_biomass_per_frame[obj["frame"]] += obj["biomass"]
+            else:
+                total_biomass_per_frame[obj["frame"]] = obj["biomass"]
+
+        # Calculate the average total biomass
+        total_biomass = sum(total_biomass_per_frame.values()) / len(
+            total_biomass_per_frame
+        )
+
+        st.write(f"Average Biomass: **{total_biomass:.2f}** pg")
+        st.write("Bacteria Biomass: To be implemented.")
+        return
     # Total biomass
     total_biomass = sum([obj["biomass"] for obj in detected_objects])
-    st.write(f"Fungi Biomass: **{total_biomass:.2f}** g")
+    st.write(f"Fungi Biomass: **{total_biomass:.2f}** pg")
     st.write("Bacteria Biomass: To be implemented.")
 
 
-def total_object_per_class(detected_objects):
+def total_object_per_class(detected_objects, is_video=False):
     st.write("---")
 
     # Subheader 3: Total objects for each class
     st.subheader("Total Objects for Each Class")
+
+    if is_video:
+        # Average the total objects for each class per frame
+        total_object_per_class_per_frame = {}
+        for obj in detected_objects:
+            if obj["frame"] in total_object_per_class_per_frame:
+                if obj["class"] in total_object_per_class_per_frame[obj["frame"]]:
+                    total_object_per_class_per_frame[obj["frame"]][obj["class"]] += 1
+                else:
+                    total_object_per_class_per_frame[obj["frame"]][obj["class"]] = 1
+            else:
+                total_object_per_class_per_frame[obj["frame"]] = {obj["class"]: 1}
+
+        # Calculate the average total objects for each class from all frames
+        total_object_per_class = {}
+        for frame in total_object_per_class_per_frame:
+            for obj_class in total_object_per_class_per_frame[frame]:
+                if obj_class in total_object_per_class:
+                    total_object_per_class[
+                        obj_class
+                    ] += total_object_per_class_per_frame[frame][obj_class]
+                else:
+                    total_object_per_class[obj_class] = (
+                        total_object_per_class_per_frame[frame][obj_class]
+                    )
+
+        # Average the total objects for each class
+        for obj_class in total_object_per_class:
+            total_object_per_class[obj_class] /= len(total_object_per_class_per_frame)
+
+        # Round the total objects
+        for obj_class in total_object_per_class:
+            total_object_per_class[obj_class] = round(total_object_per_class[obj_class])
+
+        table = pd.DataFrame(
+            {
+                "Class": list(total_object_per_class.keys()),
+                "Total Objects": list(total_object_per_class.values()),
+            }
+        )
+
+        st.write(table)
+        st.write("Defficiency: To be implemented.")
+
+        return
+
     total_object_per_class = {}
     for obj in detected_objects:
         if obj["class"] in total_object_per_class:
@@ -250,6 +314,7 @@ elif input_type == "Video":
                 "crf": "17"
             }  # Select low crf for high quality (the price is larger file size).
 
+            current_frame = 0
             while True:
                 ret, frame = video.read()
 
@@ -319,8 +384,11 @@ elif input_type == "Video":
                             "confidence": p["confidence"],
                             "color": f"rgb{colors[p['class_id']]}",
                             "class_id": p["class_id"],
+                            "frame": current_frame,
                         }
                     )
+
+                current_frame += 1
 
                 # Write the frame to the output video
                 frame = av.VideoFrame.from_ndarray(
@@ -347,10 +415,10 @@ elif input_type == "Video":
             diversity_class_sample(detected_objects)
 
             # Subheader 2: Biomass estimation
-            total_biomass(detected_objects)
+            total_biomass(detected_objects, is_video=True)
 
             # Subheader 3: Total objects for each class
-            total_object_per_class(detected_objects)
+            total_object_per_class(detected_objects, is_video=True)
 
     else:
         st.info("Please upload a video.")
