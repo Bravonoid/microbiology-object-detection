@@ -18,7 +18,7 @@ confidence = st.sidebar.slider("Confidence Level", 1, 100, 20)
 
 # Input type
 st.sidebar.subheader("Input Type")
-input_type = st.sidebar.radio("Input Type", ["Image", "Video", "Livecam"])
+input_type = st.sidebar.radio("Input Type", ["Image", "Video", "Camera"])
 
 # Model
 rf = Roboflow(api_key=st.secrets["roboflow"]["apikey"])
@@ -423,14 +423,20 @@ elif input_type == "Video":
     else:
         st.info("Please upload a video.")
 
-elif input_type == "Livecam":
-    st.header("Livecam")
-    run = st.checkbox("Run")
-    FRAME_WINDOW = st.image([])
-    camera = cv2.VideoCapture(0)
+elif input_type == "Camera":
+    # Open the camera
+    cap = st.camera_input("Take a picture")
 
-    while run:
-        _, frame = camera.read()
+    detected_objects = []
+
+    if cap is not None:
+        frame = cap.getvalue()
+
+        # Convert to numpy array
+        frame = cv2.imdecode(np.frombuffer(frame, np.uint8), cv2.IMREAD_COLOR)
+
+        # Convert to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Detect objects in the frame
         prediction = model.predict(frame, confidence=confidence, overlap=30).json()
@@ -480,8 +486,32 @@ elif input_type == "Livecam":
                 1,
             )
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Append to detected objects
+            detected_objects.append(
+                {
+                    "image": frame,
+                    "class": p["class"],
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "biomass": biomass,
+                    "confidence": p["confidence"],
+                    "color": f"rgb{colors[p['class_id']]}",
+                    "class_id": p["class_id"],
+                }
+            )
 
-        FRAME_WINDOW.image(frame)
-    else:
-        st.write("Stopped")
+        # Display the detected objects
+        st.image(frame, caption="Detected Objects", use_column_width=True)
+
+        # Subheader 1: Diversity and class sample
+        diversity_class_sample(detected_objects)
+
+        # Subheader 2: Biomass estimation
+        total_biomass(detected_objects)
+
+        # Subheader 3: Total objects for each class
+        total_object_per_class(detected_objects)
+else:
+    st.write("Invalid input type.")
