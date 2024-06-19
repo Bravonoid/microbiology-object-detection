@@ -18,7 +18,7 @@ confidence = st.sidebar.slider("Confidence Level", 1, 100, 20)
 
 # Input type
 st.sidebar.subheader("Input Type")
-input_type = st.sidebar.radio("Input Type", ["Image", "Video"])
+input_type = st.sidebar.radio("Input Type", ["Image", "Video", "Livecam"])
 
 # Model
 rf = Roboflow(api_key=st.secrets["roboflow"]["apikey"])
@@ -39,7 +39,7 @@ colors = [
 # Biomass calculation
 def calculate_biomass(area):
     # Biomass = area * 6.836/0.00001 / 2 * 0.5
-    return area * 6.836 / 0.00001 / 2 * 0.5
+    return (area * 6.836 / 0.00001 / 2 * 0.5) / 94000000
 
 
 # Only take one object per class
@@ -422,3 +422,66 @@ elif input_type == "Video":
 
     else:
         st.info("Please upload a video.")
+
+elif input_type == "Livecam":
+    st.header("Livecam")
+    run = st.checkbox("Run")
+    FRAME_WINDOW = st.image([])
+    camera = cv2.VideoCapture(0)
+
+    while run:
+        _, frame = camera.read()
+
+        # Detect objects in the frame
+        prediction = model.predict(frame, confidence=confidence, overlap=30).json()
+
+        for p in prediction["predictions"]:
+            x_center, y_center, w, h = (
+                int(p["x"]),
+                int(p["y"]),
+                int(p["width"]),
+                int(p["height"]),
+            )
+            x1, y1, x2, y2 = (
+                x_center - w // 2,
+                y_center - h // 2,
+                x_center + w // 2,
+                y_center + h // 2,
+            )
+
+            # Calculate area
+            area = w * h
+
+            # Calculate biomass
+            biomass = calculate_biomass(area)
+
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), colors[p["class_id"]], 2)
+
+            # Draw label with border
+            cv2.putText(
+                frame,
+                f'{p["class"]} ({p["confidence"]*100:.2f}%)',
+                (x1, y1 - 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),
+                1,
+            )
+
+            # Draw biomass
+            cv2.putText(
+                frame,
+                f"Biomass: {biomass:.2f} g",
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                (0, 0, 0),
+                1,
+            )
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        FRAME_WINDOW.image(frame)
+    else:
+        st.write("Stopped")
